@@ -1,0 +1,6 @@
+# Packet capture output files
+*.pcapng
+*.pcap
+
+# macOS
+.DS_Store
