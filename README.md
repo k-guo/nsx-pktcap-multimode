@@ -1,6 +1,8 @@
 # nsx-pktcap-multimode — NSX / ESXi Multi-Mode Packet Capture
 
-A shell script that simultaneously captures packets at multiple points in the ESXi network stack — VM switchport (VnicRx, VnicTx, ENSInput, Drop in parallel), physical uplinks (UplinkRcvKernel + UplinkSndKernel simultaneously), and VMkernel NICs — via `pktcap-uw` over SSH, or via the NSX Policy API.
+Run multi-point `pktcap-uw` packet captures on an ESXi host directly from your laptop — no need to SSH in manually or memorise capture point syntax. The script abstracts the complexity: launching parallel captures across multiple points simultaneously, waiting out the capture window, downloading the `.pcapng` files to your local machine, and cleaning up after itself.
+
+Supports four modes: **NSX Policy API** (no SSH required, VM must be on a VPC or NSX segment), **direct** SSH to the ESXi host and captures on VM switchport, **physical uplink**, and **VMkernel interface**. Built with production guardrails — checks for SSH connectivity, interface existence, VMFS free space, and warns before launching unfiltered captures on high-traffic uplinks.
 
 ## Capture modes
 
