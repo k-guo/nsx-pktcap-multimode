@@ -226,8 +226,6 @@ There are three distinct layers at which `pktcap-uw` can capture uplink traffic:
 | `UplinkRcv` / `UplinkSnd` | DVS portset | Valid but **marked obsoleted by VMware** (confirmed on ESXi). Sits above ENS — misses ENS fast-path traffic. Use with `--points UplinkRcv,UplinkSnd` if you specifically need portset-level captures. |
 | `--uplink vmnicX --dir 2` *(manual only)* | Raw NIC driver | Closest to wire. Run manually on the ESXi host — the script uses `--capture` points instead. |
 
-> **`UplinkRcvKernel0` is not a valid capture point.** Verified directly on ESXi: pktcap-uw returns `error: No such capture point: UplinkRcvKernel0` and prints the full list of 45 supported points — `UplinkRcvKernel0` is not among them.
-
 ---
 
 ## Capture settings
