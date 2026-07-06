@@ -9,8 +9,8 @@ Supports four modes: **NSX Policy API** (no SSH required, VM must be on a VPC or
 | Mode | Where it captures | Requirements | Best for |
 |---|---|---|---|
 | `api` | NSX SEGMENTPORT (DVS logical port boundary) | VM on NSX segment | Standard IP/TCP/UDP; no SSH needed |
-| `direct` | VM switchport — `VnicRx`, `VnicTx`, `ENSInput`, `Drop` **in parallel** | VM on any ESXi host | PROFINET, PTP, L2 multicast, drops; works without NSX segment |
-| `uplink` | Physical vmnic — `UplinkRcvKernel` + `UplinkSndKernel` **simultaneously** | `--host` + `--uplink` | Wire-level: confirms traffic arrives/leaves the host, unicast to a specific VM MAC |
+| `direct` | VM switchport — `VnicRx`, `VnicTx`, `ENSInput`, `Drop` **in parallel** | VM on any ESXi host | Any VM traffic including L2 multicast (PROFINET, PTP); see drops |
+| `uplink` | Physical vmnic — `UplinkRcvKernel` + `UplinkSndKernel` **simultaneously** | `--host` + `--uplink` | Wire-level: all traffic on the physical NIC in both directions |
 | `vmk` | VMkernel NIC (`--vmk vmk0`) | `--host` + `--vmk` | Management, vMotion, vSAN, NFS traffic |
 
 ### Capture point stack
@@ -18,27 +18,28 @@ Supports four modes: **NSX Policy API** (no SSH required, VM must be on a VPC or
 ```
 Physical wire
   ↕  NIC driver
-[ --uplink vmnicX --dir 2 ]          raw NIC level (hardware wiretap)
   ↕  VMkernel boundary
-[ UplinkRcvKernel / UplinkSndKernel ]  VMkernel ↔ NIC driver
+[ UplinkRcvKernel / UplinkSndKernel ]  VMkernel ↔ NIC driver  ← script default (uplink mode)
   ↕  DVS portset
-[ UplinkRcv / UplinkSnd ]            DVS portset  ← default for uplink mode
+[ UplinkRcv / UplinkSnd ]            DVS portset (obsoleted)
   ↕  DVS logical port
-[ PortInput / PortOutput ]           = SEGMENTPORT in NSX API
+[ PortInput / PortOutput ]           = SEGMENTPORT in NSX API  ← api mode
   ↕  vNIC driver
-[ VnicRx / VnicTx ]                  VM vNIC driver  ← default for direct mode
-[ ENSInput ]                         ENS fast-path (sender view)
+[ VnicRx / VnicTx ]                  VM vNIC driver  ← script default (direct mode)
+[ ENSInput / ENSOutput ]             ENS switch boundary  (ESX 8.0U2 + NSX 4.2.0+)
 [ Drop ]                             dropped at vSwitch
   ↕
 VM guest OS
 ```
 
+> **Note:** On ESX 6.7+, `--uplink vmnicX --dir 2` resolves to the same capture layer as the script default. The script uses explicit `--capture` points instead — empirical testing showed `--dir 2` can miss ENS fast-path frames (e.g. PRP) that explicit `--capture` reliably catches.
+
 > **`UplinkRcvKernel` vs `UplinkRcv`:**
-> `UplinkRcvKernel/UplinkSndKernel` **(script default)** captures at the VMkernel/NIC driver boundary — required for ENS environments and L2 protocols (PROFINET, PRP, PTP) that bypass the DVS portset via the ENS fast-path.
-> `UplinkRcv/UplinkSnd` captures at the DVS portset level (one layer higher). Override with `--points UplinkRcv,UplinkSnd` if you specifically need portset-level captures.
+> `UplinkRcvKernel/UplinkSndKernel` **(script default)** captures at the VMkernel/NIC driver boundary, below the ENS (Enhanced Networking Stack / Enhanced Datapath) layer. Sees all frames regardless of datapath — ENS fast-path and standard DVS slow-path alike.
+> `UplinkRcv/UplinkSnd` sits one layer higher at the DVS portset boundary and misses traffic that goes through the ENS fast-path. **Marked obsoleted by VMware.** Override with `--points UplinkRcv,UplinkSnd` if you specifically need portset-level captures.
 
 > **`api` limitations:**
-> SEGMENTPORT (= PortInput/PortOutput) is INVISIBLE to ENS fast-path traffic and L2-only multicast (PROFINET, PTP). It also requires the vNIC to be connected to an NSX segment.
+> SEGMENTPORT (= PortInput/PortOutput) is invisible to ENS fast-path traffic. It also cannot capture L2-only protocols with no IP header (PROFINET, PTP) and requires the vNIC to be on an NSX segment.
 > Use `--mode direct` for those cases.
 
 ## Requirements
@@ -101,7 +102,7 @@ ESXI_PASS="<esxi-root-password>"   # direct / uplink / vmk modes
 
 **Default `--points`:**
 - `direct` → `VnicRx,VnicTx,ENSInput,Drop`
-- `uplink` → `UplinkRcvKernel,UplinkSndKernel` (VMkernel/NIC boundary — most reliable for ENS/PROFINET)
+- `uplink` → `UplinkRcvKernel,UplinkSndKernel` (VMkernel/NIC boundary — reliable for all traffic types)
 - `vmk` → N/A (single bidirectional capture with `--dir 2`)
 
 ---
@@ -128,9 +129,9 @@ NSX API captures at the DVS logical port (SEGMENTPORT). Good for standard IP/TCP
 
 | Point | What it captures |
 |---|---|
-| `VnicRx` | Packets delivered to the VM's vNIC (inbound). Did the VM actually receive it? |
-| `VnicTx` | Packets sent by the VM's vNIC (outbound). |
-| `ENSInput` | Packets entering the ENS fast-path from the VM. |
+| `VnicRx` | Packets delivered to the VM's vNIC (inbound). Captures both ENS fast-path mbufs and non-ENS pkthandles. |
+| `VnicTx` | Packets sent by the VM's vNIC (outbound). Captures both ENS fast-path mbufs and non-ENS pkthandles. |
+| `ENSInput` | Packets entering the ENS switch from this VM port (VM transmitting). ENS-switch boundary view. Requires ESX 8.0U2 + NSX 4.2.0+. |
 | `Drop` | Packets dropped by the vSwitch at this port. |
 
 ```bash
@@ -152,7 +153,7 @@ NSX API captures at the DVS logical port (SEGMENTPORT). Good for standard IP/TCP
 
 ### 3. Physical uplink (uplink mode)
 
-Captures at the VMkernel/NIC boundary (`UplinkRcvKernel,UplinkSndKernel` by default). Both directions simultaneously. Required for L2-only protocols that bypass the DVS portset.
+Captures at the VMkernel/NIC boundary (`UplinkRcvKernel,UplinkSndKernel` by default). Both directions simultaneously. Sees all traffic on the physical NIC including L2-only protocols (PROFINET, PRP, PTP) that would be missed at higher capture points.
 
 ```bash
 # All traffic on VLAN 107
@@ -221,9 +222,9 @@ There are three distinct layers at which `pktcap-uw` can capture uplink traffic:
 
 | Capture point | Layer | Notes |
 |---|---|---|
-| `UplinkRcvKernel` / `UplinkSndKernel` (**script default**) | VMkernel/NIC boundary | Inbound/outbound at the NIC driver ↔ VMkernel boundary. Required for ENS environments and L2 protocols (PROFINET, PRP, PTP). Sees all raw frames before ENS processing. |
-| `UplinkRcv` / `UplinkSnd` | DVS portset | Valid but **marked obsoleted by VMware** (confirmed on ESXi). Sits above ENS — misses ENS fast-path traffic. Use with `--points UplinkRcv,UplinkSnd` if you specifically need portset-level captures. |
-| `--uplink vmnicX --dir 2` *(manual only)* | DVS portset (vProbe) | Uses experimental vProbe builtins. Operates at the portset level — **also misses ENS fast-path traffic** (e.g. PRP, PROFINET). Not used by this script. |
+| `UplinkRcvKernel` / `UplinkSndKernel` (**script default**) | VMkernel/NIC boundary | Inbound/outbound at the NIC driver ↔ VMkernel boundary. Below ENS — sees all frames regardless of datapath (ENS fast-path or DVS slow-path). |
+| `UplinkRcv` / `UplinkSnd` | DVS portset | **Marked obsoleted by VMware** (confirmed on ESXi). Sits one layer above ENS — misses ENS fast-path traffic. Use with `--points UplinkRcv,UplinkSnd` if you specifically need portset-level captures. |
+| `--uplink vmnicX --dir 2` *(not used by this script)* | VMkernel/NIC boundary | On ESX 6.7+, resolves to the same capture layer as `UplinkRcvKernel + UplinkSndKernel`. However, empirical testing showed it can miss ENS fast-path frames (e.g. PRP) that explicit `--capture` reliably catches. Script uses explicit `--capture` to avoid this. |
 
 ---
 

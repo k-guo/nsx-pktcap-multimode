@@ -152,7 +152,7 @@ NSX_PASS="your-nsx-password"
 # is queried directly from the NSX Manager, which syncs it from vCenter.
 
 ESXI_USER="root"
-ESXI_PASS="your-esxi-password"        # used in direct, uplink, and vmk modes (sshpass)
+ESXI_PASS="your-esxi-password" # used in direct, uplink, and vmk modes (sshpass)
 
 # Capture settings
 CAP_DIRECTION="DUAL"       # INPUT | OUTPUT | DUAL  (NOTE: "DUAL" = both directions — the NSX API
@@ -602,7 +602,6 @@ if [[ -z "$CAP_POINTS" ]]; then
         # ENS fast-path traffic. Use --points UplinkRcv,UplinkSnd to override.
         # If UplinkRcvKernel produces no traffic, confirm with:
         #   pktcap-uw --capture UplinkRcvKernel --uplink vmnicX -e -c 10 -o -
-        # UplinkRcvKernel0 (with suffix) is NOT a valid capture point on ESXi.
         uplink) CAP_POINTS="UplinkRcvKernel,UplinkSndKernel" ;;
     esac
 fi
