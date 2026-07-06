@@ -33,10 +33,9 @@ Physical wire
 VM guest OS
 ```
 
-> **`UplinkRcv` vs `UplinkRcvKernel`:**
-> `UplinkRcv/UplinkSnd` (the default) captures at the DVS portset boundary — reliable for L2 multicast debugging.
-> `UplinkRcvKernel/UplinkSndKernel` is one layer lower (VMkernel/NIC boundary) and may show NIC offload effects like LRO reassembly.
-> Override with `--points UplinkRcvKernel,UplinkSndKernel` if needed.
+> **`UplinkRcvKernel` vs `UplinkRcv`:**
+> `UplinkRcvKernel/UplinkSndKernel` **(script default)** captures at the VMkernel/NIC driver boundary — required for ENS environments and L2 protocols (PROFINET, PRP, PTP) that bypass the DVS portset via the ENS fast-path.
+> `UplinkRcv/UplinkSnd` captures at the DVS portset level (one layer higher). Override with `--points UplinkRcv,UplinkSnd` if you specifically need portset-level captures.
 
 > **`api` limitations:**
 > SEGMENTPORT (= PortInput/PortOutput) is INVISIBLE to ENS fast-path traffic and L2-only multicast (PROFINET, PTP). It also requires the vNIC to be connected to an NSX segment.
@@ -222,9 +221,9 @@ There are three distinct layers at which `pktcap-uw` can capture uplink traffic:
 
 | Capture point | Layer | Notes |
 |---|---|---|
-| `UplinkRcvKernel` / `UplinkSndKernel` (**script default**) | VMkernel/NIC boundary | Inbound/outbound at the NIC driver ↔ VMkernel boundary. Required for ENS environments and L2 protocols (PROFINET, PTP). |
+| `UplinkRcvKernel` / `UplinkSndKernel` (**script default**) | VMkernel/NIC boundary | Inbound/outbound at the NIC driver ↔ VMkernel boundary. Required for ENS environments and L2 protocols (PROFINET, PRP, PTP). Sees all raw frames before ENS processing. |
 | `UplinkRcv` / `UplinkSnd` | DVS portset | Valid but **marked obsoleted by VMware** (confirmed on ESXi). Sits above ENS — misses ENS fast-path traffic. Use with `--points UplinkRcv,UplinkSnd` if you specifically need portset-level captures. |
-| `--uplink vmnicX --dir 2` *(manual only)* | Raw NIC driver | Closest to wire. Run manually on the ESXi host — the script uses `--capture` points instead. |
+| `--uplink vmnicX --dir 2` *(manual only)* | DVS portset (vProbe) | Uses experimental vProbe builtins. Operates at the portset level — **also misses ENS fast-path traffic** (e.g. PRP, PROFINET). Not used by this script. |
 
 ---
 
